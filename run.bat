@@ -7,28 +7,21 @@ REM =========================
 REM Configuration
 REM =========================
 
-REM 1) Command that generates JSON files
-set "RUN_COMMAND=uv run scraper.py"
-
-REM 2) Directory where JSON files are created.
-REM Usually this is the folder where this .bat file and scraper.py are located.
 set "SOURCE_JSON_DIR=%~dp0"
+set "TARGET_REPO_DIR=C:\IMDB_Top_250"
 
-REM 3) Local path to cloned target repository
-set "TARGET_REPO_DIR=A:\imdbscraper2"
-
-REM 4) GitHub target repository and branch
 set "GITHUB_REPO_URL=https://github.com/Druidblack/IMDB_Top_250.git"
 set "GITHUB_REPO_BRANCH=main"
 
-REM 5) GitHub credentials for push
 set "GITHUB_USERNAME=Druidblack"
-set "GITHUB_TOKEN=you_token"
+set "GITHUB_TOKEN=ghp_"
 
-REM 6) Git commit metadata
 set "GIT_USER_NAME=IMDb Scraper Bot"
 set "GIT_USER_EMAIL=imdb-scraper-bot@localhost"
 set "GIT_COMMIT_MESSAGE=Update IMDb Top 250 JSON files"
+
+set "UV_LOCAL_DIR=%~dp0tools\uv"
+set "UV_EXE=%UV_LOCAL_DIR%\uv.exe"
 
 REM =========================
 REM Validation
@@ -60,16 +53,76 @@ if not exist "%TARGET_REPO_DIR%\.git" (
     exit /b 1
 )
 
+if not exist "scraper.py" (
+    echo [ERROR] scraper.py was not found in:
+    echo %cd%
+    pause
+    exit /b 1
+)
+
 REM =========================
-REM Run your existing generator
+REM Resolve / install uv
+REM =========================
+
+where uv >nul 2>nul
+if not errorlevel 1 (
+    for /f "delims=" %%I in ('where uv') do (
+        set "UV_EXE=%%I"
+        goto :uv_found
+    )
+)
+
+if exist "%UV_EXE%" goto :uv_found
+
+echo.
+echo uv not found in PATH. Installing local uv to:
+echo %UV_LOCAL_DIR%
+echo.
+
+if not exist "%UV_LOCAL_DIR%" mkdir "%UV_LOCAL_DIR%"
+
+powershell -ExecutionPolicy ByPass -Command ^
+  "$env:UV_INSTALL_DIR='%UV_LOCAL_DIR%'; irm https://astral.sh/uv/install.ps1 | iex"
+
+if errorlevel 1 (
+    echo [ERROR] Failed to install uv.
+    pause
+    exit /b 1
+)
+
+if not exist "%UV_EXE%" (
+    echo [ERROR] uv.exe was not found after installation:
+    echo %UV_EXE%
+    pause
+    exit /b 1
+)
+
+:uv_found
+echo.
+echo Using uv:
+echo %UV_EXE%
+echo.
+
+REM =========================
+REM Install Playwright Chromium
+REM =========================
+
+"%UV_EXE%" tool run playwright install chromium
+if errorlevel 1 (
+    echo [ERROR] Failed to install Playwright Chromium.
+    pause
+    exit /b 1
+)
+
+REM =========================
+REM Run generator
 REM =========================
 
 echo.
 echo Running generator...
-echo %RUN_COMMAND%
 echo.
 
-call %RUN_COMMAND%
+"%UV_EXE%" run scraper.py
 set "RUN_EXITCODE=%ERRORLEVEL%"
 
 if not "%RUN_EXITCODE%"=="0" (
@@ -84,10 +137,7 @@ REM Copy JSON files to repo
 REM =========================
 
 echo.
-echo Copying JSON files from:
-echo %SOURCE_JSON_DIR%
-echo to:
-echo %TARGET_REPO_DIR%
+echo Copying JSON files...
 echo.
 
 set "FOUND_JSON=0"
@@ -107,12 +157,8 @@ if "!FOUND_JSON!"=="0" (
 )
 
 REM =========================
-REM Commit and push to GitHub
+REM Commit and push
 REM =========================
-
-echo.
-echo Preparing git commit...
-echo.
 
 git -C "%TARGET_REPO_DIR%" config user.name "%GIT_USER_NAME%"
 git -C "%TARGET_REPO_DIR%" config user.email "%GIT_USER_EMAIL%"
@@ -139,11 +185,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo.
-echo Pushing to GitHub...
-echo.
-
 set "AUTH_PUSH_URL=https://%GITHUB_USERNAME%:%GITHUB_TOKEN%@github.com/Druidblack/IMDB_Top_250.git"
+
 git -C "%TARGET_REPO_DIR%" pull --rebase origin "%GITHUB_REPO_BRANCH%"
 if errorlevel 1 (
     echo [ERROR] git pull --rebase failed.
